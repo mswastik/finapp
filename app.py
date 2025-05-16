@@ -6,6 +6,13 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 import pandas as pd
 import sys
+import json
+import requests
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
+from pyxirr import xirr
+#import io
+#import csv
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'xlsx'}
@@ -22,6 +29,58 @@ db_session = scoped_session(sessionmaker(autocommit=False,
                                          bind=engine))
 Base = declarative_base()
 Base.query = db_session.query_property()
+
+def load_fund_codes(cache_file='fund_mapping_cache.json'):
+    fund_code_mapping = {}
+
+    try:
+        with open(cache_file, 'r') as f:
+            fund_code_mapping = json.load(f)
+            print(f"Loaded {len(fund_code_mapping)} fund mappings from cache.")
+            return fund_code_mapping
+    except (FileNotFoundError, json.JSONDecodeError):
+        print("No valid cache found. Fetching from API...")
+    
+    try:
+        # Fetch the list of all mutual funds
+        response = requests.get("https://api.mfapi.in/mf")
+        
+        if response.status_code == 200:
+            funds_data = response.json()
+            total_funds = len(funds_data)
+            print(f"Found {total_funds} funds. Processing...")
+            
+            # Process each fund - get scheme code and name
+            for i, fund in enumerate(funds_data):
+                if i % 100 == 0:
+                    print(f"Processed {i}/{total_funds} funds...")
+                
+                scheme_code = fund.get("schemeCode")
+                scheme_name = fund.get("schemeName", "").strip().lower()
+                
+                if scheme_code and scheme_name:
+                    fund_code_mapping[scheme_name] = str(scheme_code)
+                    
+                    # Also add a version without the dash format to improve matching
+                    if " - " in scheme_name:
+                        no_dash_name = scheme_name.replace(" - ", " ")
+                        fund_code_mapping[no_dash_name] = str(scheme_code)
+            
+            # Cache the results
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump(fund_code_mapping, f)
+                print(f"Cached {len(fund_code_mapping)} fund mappings.")
+            except Exception as e:
+                print(f"Warning: Could not save cache: {e}")
+                
+        else:
+            print(f"API request failed with status code: {response.status_code}")
+            
+    except Exception as e:
+        print(f"Error fetching fund codes from API: {e}")
+            
+    return fund_code_mapping
 
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -51,46 +110,116 @@ class MutualFundTransaction(Base):
     units = Column(Float, nullable=False)
     nav = Column(Float, nullable=False)
     timestamp = Column(DateTime, nullable=False)
+    fund_code = Column(String(20), unique=False, nullable=True) # Add fund_code column
 
-    def __init__(self, fund_name=None, transaction_type=None, amount=None, units=None, nav=None, timestamp=None):
+    def __init__(self, fund_name=None, transaction_type=None, amount=None, units=None, nav=None, timestamp=None, fund_code=None):
         self.fund_name = fund_name
         self.transaction_type = transaction_type
         self.amount = amount
         self.units = units
         self.nav = nav
         self.timestamp = timestamp
+        self.fund_code = fund_code # Initialize fund_code
 
     def __repr__(self):
         return '<MutualFundTransaction %r>' % (self.fund_name)
 
-# Helper function to process the uploaded Excel file
-def process_excel_data(filepath):
+# Helper function to process the uploaded Excel files
+def process_excel_data(mutual_funds_filepath): # Only accept mutual funds file path
     try:
-        xls = pd.ExcelFile(filepath,engine='openpyxl')
-        # Assuming sheets named 'Account Balances' and 'Mutual Funds'
-        account_balances_df = xls.parse('Account Balances')
-        mutual_funds_df = xls.parse('Mutual Funds')
+        try:
+            # Read Mutual Fund Transactions
+            mutual_funds_xls = pd.ExcelFile(mutual_funds_filepath, engine='openpyxl')
+            mutual_funds_df = mutual_funds_xls.parse('SWASTIK_9469790', skiprows=3) # Read from the specified sheet name and skip header rows
 
-        # Process Account Balances
-        for index, row in account_balances_df.iterrows():
-            balance_entry = AccountBalance(
-                account_name=row['Account Name'],
-                balance=row['Balance'],
-                timestamp=row['Timestamp'] # Assuming timestamp is in a suitable format
-            )
-            db_session.add(balance_entry)
+            # Convert 'Trade Date' to datetime objects
+            mutual_funds_df['Trade Date'] = pd.to_datetime(mutual_funds_df['Trade Date'])
+
+        except Exception as e:
+            print(f"Error reading Excel file: {e}")
+            return False
+
+        # Account Balances processing (commented out as per user request)
+        # try:
+        #     account_balances_xls = pd.ExcelFile(account_balances_filepath, engine='openpyxl')
+        #     account_balances_df = account_balances_xls.parse('Account Balances')
+        #     for index, row in account_balances_df.iterrows():
+        #         balance_entry = AccountBalance(
+        #             account_name=row['Account Name'],
+        #             balance=row['Balance'],
+        #             timestamp=row['Timestamp'] # Assuming timestamp is in a suitable format
+        #         )
+        #         db_session.add(balance_entry)
+        # except Exception as e:
+        #     print(f"Error processing Account Balances file: {e}")
+        #     # Decide how to handle this error - continue with mutual funds or return False?
+        #     # For now, let's continue with mutual funds processing
+        #     pass
+
+
+        # Load fund codes mapping for processing
+        fund_code_mapping = load_fund_codes()
+
+        # Get unique fund names and find their codes once
+        unique_fund_names = mutual_funds_df['Investment name'].unique()
+        fund_codes_for_transactions = {}
+
+        for fund_name in unique_fund_names:
+            fund_code = fund_code_mapping.get(fund_name.lower()) # Get fund code from mapping (case-insensitive)
+
+            if not fund_code:
+                # If direct match not found, try fuzzy matching
+                best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
+                if score > 80: # Use a threshold, e.g., 80
+                    fund_code = fund_code_mapping.get(best_match)
+                    print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
+                else:
+                    print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
+
+            fund_codes_for_transactions[fund_name] = fund_code # Store the found fund code (or None)
+
 
         # Process Mutual Fund Transactions
         for index, row in mutual_funds_df.iterrows():
-            transaction_entry = MutualFundTransaction(
-                fund_name=row['Fund Name'],
-                transaction_type=row['Transaction Type'],
-                amount=row['Amount'],
-                units=row['Units'],
-                nav=row['NAV'],
-                timestamp=row['Timestamp'] # Assuming timestamp is in a suitable format
-            )
-            db_session.add(transaction_entry)
+            # print(row) # Uncomment for debugging row data
+            fund_name = row['Investment name']
+            fund_code = fund_codes_for_transactions.get(fund_name) # Get the fund code from the pre-fetched dictionary
+
+            transaction_type = None
+            amount = 0.0
+            units = 0.0
+            nav = 0.0 # NAV is missing, setting to 0 for now
+
+            if row.get('Buy units', 0) > 0:
+                transaction_type = 'Buy'
+                units = row['Buy units']
+                amount = row.get('Cash inflow', 0)
+            elif row.get('Sell units', 0) > 0:
+                transaction_type = 'Sell'
+                units = row['Sell units']
+                amount = row.get('Cash outflow', 0)
+            elif row.get('Dividend reinvested units', 0) > 0:
+                 transaction_type = 'Buy' # Reinvestment is a form of buying units
+                 units = row['Dividend reinvested units']
+                 amount = row.get('Dividend Amount', 0)
+
+            calculated_nav = 0.0
+            if units != 0:
+                # Use absolute value of amount for NAV calculation for sell transactions
+                nav_amount = abs(amount) if transaction_type == 'Sell' else amount
+                calculated_nav = nav_amount / units
+
+            if transaction_type: # Only process if a transaction type is determined
+                transaction_entry = MutualFundTransaction(
+                    fund_name=fund_name,
+                    transaction_type=transaction_type,
+                    amount=amount,
+                    units=units,
+                    nav=calculated_nav, # Use calculated NAV
+                    timestamp=row['Trade Date'],
+                    fund_code=fund_code # Save the fetched fund code
+                )
+                db_session.add(transaction_entry)
 
         db_session.commit()
         return True
@@ -110,22 +239,31 @@ def allowed_file(filename):
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        if 'file' not in request.files:
-            return redirect(request.url)
-        file = request.files['file']
-        if file.filename == '':
-            return redirect(request.url)
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            if process_excel_data(filepath):
-                return 'File successfully uploaded and data processed'
+        if 'mutual_funds_file' not in request.files or 'account_balances_file' not in request.files:
+            return "Missing one or both files", 400
+
+        mutual_funds_file = request.files['mutual_funds_file']
+        account_balances_file = request.files['account_balances_file']
+
+        if mutual_funds_file.filename == '' and account_balances_file.filename == '':
+            return "One or both files have no selected file", 400
+
+        if mutual_funds_file and allowed_file(mutual_funds_file.filename): # and account_balances_file and allowed_file(account_balances_file.filename):
+            mutual_funds_filename = secure_filename(mutual_funds_file.filename)
+            #account_balances_filename = secure_filename(account_balances_file.filename)
+
+            mutual_funds_filepath = os.path.join(app.config['UPLOAD_FOLDER'], mutual_funds_filename)
+            #account_balances_filepath = os.path.join(app.config['UPLOAD_FOLDER'], account_balances_filename)
+
+            mutual_funds_file.save(mutual_funds_filepath)
+            #account_balances_file.save(account_balances_filepath)
+
+            if process_excel_data(mutual_funds_filepath): #, account_balances_filepath):
+                return 'Files successfully uploaded and data processed'
             else:
-                return 'File uploaded but data processing failed'
+                return 'Files uploaded but data processing failed'
         else:
-            return 'Invalid file type'
+            return 'Invalid file type for one or both files'
     return render_template('index.html')
 
 @app.route('/balances')
@@ -140,31 +278,110 @@ def show_transactions():
 
 @app.route('/performance')
 def show_performance():
-    # This is a simplified calculation and needs more sophisticated logic
-    # to handle different transaction types, splits, dividends, etc.
     fund_performance = {}
     transactions = MutualFundTransaction.query.order_by(MutualFundTransaction.timestamp).all()
 
     for transaction in transactions:
-        if transaction.fund_name not in fund_performance:
-            fund_performance[transaction.fund_name] = {
+        fund_name = transaction.fund_name
+        fund_code = transaction.fund_code # Get fund code from the database
+
+        if fund_name not in fund_performance:
+            fund_performance[fund_name] = {
                 'total_invested': 0,
                 'total_units': 0,
-                'transactions': []
+                'realized_gains': 0.0,
+                'unrealized_gains': 0.0,
+                'xirr_cash_flows': [], # For XIRR calculation [(amount, date)]
+                'cost_basis': 0.0, # For average cost basis tracking
+                'transactions': [],
+                'fund_code': fund_code # Store fund code in performance data
             }
 
-        fund_performance[transaction.fund_name]['transactions'].append(transaction)
+        fund_data = fund_performance[fund_name]
+        fund_data['transactions'].append(transaction)
+
+        # For XIRR calculation, amount is negative for buys, positive for sells
+        xirr_amount = -abs(transaction.amount) if transaction.transaction_type.lower() == 'buy' else abs(transaction.amount)
+        fund_data['xirr_cash_flows'].append((xirr_amount, transaction.timestamp))
+
 
         if transaction.transaction_type.lower() == 'buy':
-            fund_performance[transaction.fund_name]['total_invested'] += transaction.amount
-            fund_performance[transaction.fund_name]['total_units'] += transaction.units
+            fund_data['total_invested'] += transaction.amount
+            fund_data['total_units'] += transaction.units
+            # Update average cost basis
+            fund_data['cost_basis'] += transaction.amount
         elif transaction.transaction_type.lower() == 'sell':
-            fund_performance[transaction.fund_name]['total_invested'] -= transaction.amount # This is a simplification
-            fund_performance[transaction.fund_name]['total_units'] -= transaction.units
+            # Calculate realized gains using average cost basis
+            if fund_data['total_units'] > 0:
+                average_cost_per_unit = fund_data['cost_basis'] / fund_data['total_units']
+                realized_gain = (transaction.nav - average_cost_per_unit) * transaction.units
+                fund_data['realized_gains'] += realized_gain # Take absolute value of realized gain
 
-    # For a real application, you would fetch the current NAV to calculate current value
-    # and then calculate returns (absolute, CAGR).
-    # For this example, we'll just pass the aggregated transaction data.
+            # Update total_units for sell transactions
+            fund_data['total_units'] -= transaction.units
+            # Update cost basis after selling
+            fund_data['cost_basis'] -= average_cost_per_unit * transaction.units
+
+
+    # Calculate Unrealized Gains and XIRR
+    import numpy_financial as npf
+    import datetime
+    import requests
+
+    for fund_name, fund_data in fund_performance.items():
+        # Fetch current NAV from mfapi.in using fund code from database
+        current_nav = 0.0
+        fund_code = fund_data.get('fund_code') # Get fund code from stored performance data
+
+        if fund_code:
+            api_url = f"https://api.mfapi.in/mf/{fund_code}/latest"
+            try:
+                response = requests.get(api_url)
+                response.raise_for_status() # Raise an exception for bad status codes
+                data = response.json()
+                if data and 'data' in data and data['data']:
+                    current_nav = float(data['data'][0]['nav'])
+            except requests.exceptions.RequestException as e:
+                print(f"Error fetching NAV for {fund_name} (code: {fund_code}): {e}")
+                # Fallback to latest NAV from transactions if API call fails
+                if fund_data['transactions']:
+                     current_nav = fund_data['transactions'][-1].nav
+        else:
+            print(f"Fund code not available in database for {fund_name}")
+            # Fallback to latest NAV from transactions if fund code is not found in database
+            if fund_data['transactions']:
+                 current_nav = fund_data['transactions'][-1].nav
+
+        # Add current_nav to the fund_performance dictionary
+        fund_data['current_nav'] = current_nav
+
+        # Calculate Unrealized Gains and XIRR
+        if fund_data['total_units'] > 0 and current_nav > 0:
+            current_value = fund_data['total_units'] * current_nav
+            # Unrealized gain is current value minus the remaining cost basis
+            remaining_cost_basis = fund_data['cost_basis']
+            fund_data['unrealized_gains'] = current_value - remaining_cost_basis
+        else:
+             fund_data['unrealized_gains'] = 0.0 # No units or current NAV, no unrealized gain
+
+        # Calculate XIRR
+        if len(fund_data['xirr_cash_flows']) > 1 and current_nav > 0:
+            # Add the current value as a final cash flow at today's date for XIRR
+            today = datetime.date.today()
+            final_cash_flow_amount = fund_data['total_units'] * current_nav
+            xirr_values = [cf[0] for cf in fund_data['xirr_cash_flows']] + [final_cash_flow_amount]
+            xirr_dates = [cf[1] for cf in fund_data['xirr_cash_flows']] + [today]
+
+            try:
+                # Convert datetime objects to date objects for xirr
+                xirr_dates = [d.date() if isinstance(d, datetime.datetime) else d for d in xirr_dates]
+                fund_data['xirr'] = xirr(xirr_dates,xirr_values)
+            except Exception as e:
+                print(f"  Error calculating XIRR: {e}")
+                fund_data['xirr'] = 0.0 # Handle cases where XIRR cannot be calculated (e.g., no cash flows)
+        else:
+            print(f"XIRR not calculated for {fund_name}: Insufficient cash flows or current NAV <= 0")
+            fund_data['xirr'] = 0.0 # Not enough cash flows or current NAV to calculate XIRR
 
     return render_template('performance.html', fund_performance=fund_performance)
 

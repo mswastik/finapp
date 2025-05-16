@@ -18,8 +18,12 @@
             <tr>
                 <th>Fund Name</th>
                 <th>Total Invested</th>
+                <th>Current Value</th>
                 <th>Total Units</th>
-                <!-- Add columns for current value, profit/loss, CAGR if calculated -->
+                <th>Realized Gains</th>
+                <th>Unrealized Gains</th>
+                <th>XIRR</th>
+                <!-- Add columns for profit/loss, CAGR if calculated -->
             </tr>
         </thead>
         <tbody>
@@ -27,39 +31,16 @@
             <tr>
                 <td>{{ fund_name }}</td>
                 <td>{{ "%.2f" | format(data.total_invested) }}</td>
+                <td>{{ "%.2f" | format(data.total_units * data.current_nav) if data.total_units > 0 and data.current_nav > 0 else "0.00" }}</td>
                 <td>{{ "%.5f" | format(data.total_units) }}</td>
+                <td>{{ "%.2f" | format(data.realized_gains) }}</td>
+                <td>{{ "%.2f" | format(data.unrealized_gains) }}</td>
+                <td>{{ "%.2f" | format(data.xirr) }}</td>
                 <!-- Display calculated performance metrics here -->
             </tr>
             {% endfor %}
         </tbody>
     </table>
-
-    <h2>Transactions per Fund</h2>
-    {% for fund_name, data in fund_performance.items() %}
-        <h3>{{ fund_name }}</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Transaction Type</th>
-                    <th>Amount</th>
-                    <th>Units</th>
-                    <th>NAV</th>
-                    <th>Timestamp</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for transaction in data.transactions %}
-                <tr>
-                    <td>{{ transaction.transaction_type }}</td>
-                    <td>{{ "%.2f" | format(transaction.amount) }}</td>
-                    <td>{{ "%.5f" | format(transaction.units) }}</td>
-                    <td>{{ "%.4f" | format(transaction.nav) }}</td>
-                    <td>{{ transaction.timestamp }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% endfor %}
     <script>
 $(document).ready( function () {
     $('table').DataTable();

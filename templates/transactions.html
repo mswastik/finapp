@@ -22,6 +22,7 @@
                 <th>Units</th>
                 <th>NAV</th>
                 <th>Timestamp</th>
+                <th>Fund Code</th>
             </tr>
         </thead>
         <tbody>
@@ -33,6 +34,7 @@
                 <td>{{ "%.5f" | format(transaction.units) }}</td>
                 <td>{{ "%.4f" | format(transaction.nav) }}</td>
                 <td>{{ transaction.timestamp }}</td>
+                <td>{{ transaction.fund_code if transaction.fund_code else 'N/A' }}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -9,9 +9,16 @@
         <a href="/performance">Mutual Fund Performance</a>
     </nav>
     <h1>Finance Management Webapp</h1>
-    <h2>Upload New File</h2>
+    <h2>Upload New Files</h2>
     <form method=post enctype=multipart/form-data>
-      <input type=file name=file>
+      <div>
+        <label for="mutual_funds_file">Mutual Funds File:</label>
+        <input type="file" name="mutual_funds_file" id="mutual_funds_file">
+      </div>
+      <div>
+        <label for="account_balances_file">Account Balances File:</label>
+        <input type="file" name="account_balances_file" id="account_balances_file">
+      </div>
       <input type=submit value=Upload>
     </form>
 </body>
