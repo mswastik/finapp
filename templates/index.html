@@ -1,0 +1,18 @@
+<!doctype html>
+<title>Finance App</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<body>
+    <nav class="top-nav">
+        <a href="/">Upload Data</a> |
+        <a href="/balances">Account Balances</a> |
+        <a href="/transactions">Mutual Fund Transactions</a> |
+        <a href="/performance">Mutual Fund Performance</a>
+    </nav>
+    <h1>Finance Management Webapp</h1>
+    <h2>Upload New File</h2>
+    <form method=post enctype=multipart/form-data>
+      <input type=file name=file>
+      <input type=submit value=Upload>
+    </form>
+</body>
+</html>

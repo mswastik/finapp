@@ -1,0 +1,40 @@
+<!doctype html>
+<title>Account Balances</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.css">
+    <script type="text/javascript" charset="utf8" src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.js"></script>
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/">Upload Data</a> |
+        <a href="/balances">Account Balances</a> |
+        <a href="/transactions">Mutual Fund Transactions</a> |
+        <a href="/performance">Mutual Fund Performance</a>
+    </nav>
+    <h1>Account Balances</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Account Name</th>
+                <th>Balance</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for balance in account_balances %}
+            <tr>
+                <td>{{ balance.account_name }}</td>
+                <td>{{ "%.2f" | format(balance.balance) }}</td>
+                <td>{{ balance.timestamp }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <script>
+$(document).ready( function () {
+    $('table').DataTable();
+} );
+</script>
+</body>
+</html>
