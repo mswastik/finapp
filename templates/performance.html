@@ -14,12 +14,13 @@
     </nav>
     <h1>Mutual Fund Performance</h1>
 
-    <div>
-        <h2>Overall Portfolio Summary</h2>
-        <p>Total Realized Gains: {{ "%.2f" | format(total_realized_gains) }}</p>
-        <p>Total Unrealized Gains: {{ "%.2f" | format(total_unrealized_gains) }}</p>
+    <div class="card">
+        <div class="cardcontent">
+        <h2 style="color: whitesmoke;">Overall Portfolio Summary</h2>
+        <p>Realized Gains: {{ "%.2f" | format(total_realized_gains) }}</p>
+        <p> Unrealized Gains: {{ "%.2f" | format(total_unrealized_gains) }}</p>
         <p>Overall XIRR: {{ "%.2f%%" | format(overall_xirr * 100) if overall_xirr is not none else 'N/A' }}</p>
-    </div>
+    </div></div>
 
     <table>
         <thead>
@@ -38,38 +39,33 @@
             {% for fund_name, data in fund_performance.items() %}
             <tr style="cursor: pointer;">
                 <td>{{ fund_name }}</td>
-                <td>{{ "%.2f" | format(data.total_invested) }}</td>
+                <td>{{ "%.0f" | format(data.total_invested) }}</td>
                 <td>{{ "%.2f" | format(data.total_units * data.current_nav) if data.total_units > 0 and data.current_nav > 0 else "0.00" }}</td>
-                <td>{{ "%.5f" | format(data.total_units) }}</td>
-                <td>{{ "%.2f" | format(data.realized_gains) }}</td>
+                <td>{{ "%.3f" | format(data.total_units) }}</td>
+                <td>{{ "%.0f" | format(data.realized_gains) }}</td>
                 <td>{{ "%.2f" | format(data.unrealized_gains) }}</td>
-                <td>{{ "%.2f" | format(data.xirr) }}</td>
+                <td>{{ "%.2f%%" | format(data.xirr* 100) }}</td>
                 <!-- Display calculated performance metrics here -->
             </tr>
             {% endfor %}
         </tbody>
     </table>
-
+ <div style="display: flex;">
     <div id="performanceChart" style="width: 900px; height:500px;">
     </div>
-
+   <button style="max-width: 90px;max-height: 35px;" onclick="renderChart();">Reset</button>
+</div>
     <script id="portfolio-history-data" type="application/json">{{ portfolio_history | tojson | safe }}</script>
     <script id="fund-history-data" type="application/json">{{ fund_history | tojson | safe }}</script>
 
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script>
-        $(document).ready(function () {
-            $('table').DataTable();
-
-            const portfolioHistory = JSON.parse(document.getElementById('portfolio-history-data').textContent);
-            const fundHistory = JSON.parse(document.getElementById('fund-history-data').textContent);
-            const chartDom = document.getElementById('performanceChart');
+         const portfolioHistory = JSON.parse(document.getElementById('portfolio-history-data').textContent);
+         const fundHistory = JSON.parse(document.getElementById('fund-history-data').textContent);
+        function renderChart(data=portfolioHistory, label='Total Portfolio Value') {
             const myChart = echarts.init(document.getElementById('performanceChart'));
-
             let option;
-
-            function renderChart(data, label) {
-                const chartData = data.map(item => [item[0], item[1]]);
+            const chartData = data.map(item => [item[0], item[1].toFixed(0)]);
 
                 option = {
                     title: {
@@ -77,7 +73,6 @@
                     },
                     tooltip: {
                         trigger: 'axis',
-                        show: true
                     },
                     xAxis: {
                         type: 'time',
@@ -92,21 +87,22 @@
                         type: 'value',
                         axisLabel: {
                             formatter: function (value) {
-                                return value.toFixed(2);
+                                return value.toFixed(0);
                             }
                         }
                     },
                     series: [{
                         name: label,
                         type: 'line',
-                        data: chartData
+                        data: chartData,
                     }]
                 };
 
                 myChart.setOption(option);
 
             }
-
+        $(document).ready(function () {
+            $('table').DataTable();
             // Initial render: Total Portfolio Value
             renderChart(portfolioHistory, 'Total Portfolio Value');
 

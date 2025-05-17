@@ -41,32 +41,32 @@ def load_fund_codes(cache_file='fund_mapping_cache.json'):
             return fund_code_mapping
     except (FileNotFoundError, json.JSONDecodeError):
         print("No valid cache found. Fetching from API...")
-    
+
     try:
         # Fetch the list of all mutual funds
         response = requests.get("https://api.mfapi.in/mf")
-        
+
         if response.status_code == 200:
             funds_data = response.json()
             total_funds = len(funds_data)
             print(f"Found {total_funds} funds. Processing...")
-            
+
             # Process each fund - get scheme code and name
             for i, fund in enumerate(funds_data):
                 if i % 100 == 0:
                     print(f"Processed {i}/{total_funds} funds...")
-                
+
                 scheme_code = fund.get("schemeCode")
                 scheme_name = fund.get("schemeName", "").strip().lower()
-                
+
                 if scheme_code and scheme_name:
                     fund_code_mapping[scheme_name] = str(scheme_code)
-                    
+
                     # Also add a version without the dash format to improve matching
                     if " - " in scheme_name:
                         no_dash_name = scheme_name.replace(" - ", " ")
                         fund_code_mapping[no_dash_name] = str(scheme_code)
-            
+
             # Cache the results
             try:
                 with open(cache_file, 'w') as f:
@@ -74,14 +74,35 @@ def load_fund_codes(cache_file='fund_mapping_cache.json'):
                 print(f"Cached {len(fund_code_mapping)} fund mappings.")
             except Exception as e:
                 print(f"Warning: Could not save cache: {e}")
-                
+
         else:
             print(f"API request failed with status code: {response.status_code}")
-            
+
     except Exception as e:
         print(f"Error fetching fund codes from API: {e}")
-            
+
     return fund_code_mapping
+
+def fetch_current_nav(fund_code):
+    """Fetches the current NAV for a given fund code."""
+    if not fund_code:
+        return None
+
+    try:
+        response = requests.get(f"https://api.mfapi.in/mf/{fund_code}")
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and data['data']:
+                # The latest NAV is the first entry in the 'data' list
+                latest_data = data['data'][0]
+                return float(latest_data.get('nav'))
+        else:
+            print(f"Error fetching NAV for fund code {fund_code}: Status code {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching NAV for fund code {fund_code}: {e}")
+
+    return None
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -102,6 +123,23 @@ class AccountBalance(Base):
     def __repr__(self):
         return '<AccountBalance %r>' % (self.account_name)
 
+class Fund(Base):
+    __tablename__ = 'funds'
+    id = Column(Integer, primary_key=True)
+    fund_name = Column(String(120), unique=True, nullable=False)
+    fund_code = Column(String(20), unique=True, nullable=False)
+    current_nav = Column(Float, nullable=True) # Store current NAV here
+    last_updated = Column(DateTime, nullable=True) # Add last updated timestamp
+
+    def __init__(self, fund_name=None, fund_code=None, current_nav=None, last_updated=None):
+        self.fund_name = fund_name
+        self.fund_code = fund_code
+        self.current_nav = current_nav
+        self.last_updated = last_updated
+
+    def __repr__(self):
+        return '<Fund %r>' % (self.fund_name)
+
 class MutualFundTransaction(Base):
     __tablename__ = 'mutual_fund_transactions'
     id = Column(Integer, primary_key=True)
@@ -111,16 +149,14 @@ class MutualFundTransaction(Base):
     units = Column(Float, nullable=False)
     nav = Column(Float, nullable=False)
     timestamp = Column(DateTime, nullable=False)
-    fund_code = Column(String(20), unique=False, nullable=True) # Add fund_code column
 
-    def __init__(self, fund_name=None, transaction_type=None, amount=None, units=None, nav=None, timestamp=None, fund_code=None):
+    def __init__(self, fund_name=None, transaction_type=None, amount=None, units=None, nav=None, timestamp=None):
         self.fund_name = fund_name
         self.transaction_type = transaction_type
         self.amount = amount
         self.units = units
         self.nav = nav
         self.timestamp = timestamp
-        self.fund_code = fund_code # Initialize fund_code
 
     def __repr__(self):
         return '<MutualFundTransaction %r>' % (self.fund_name)
@@ -161,9 +197,11 @@ def process_excel_data(mutual_funds_filepath): # Only accept mutual funds file p
         # Load fund codes mapping for processing
         fund_code_mapping = load_fund_codes()
 
-        # Get unique fund names and find their codes once
+        # Load fund codes mapping for processing
+        fund_code_mapping = load_fund_codes()
+
+        # Get unique fund names and find their codes once, and add/update Fund table
         unique_fund_names = mutual_funds_df['Investment name'].unique()
-        fund_codes_for_transactions = {}
 
         for fund_name in unique_fund_names:
             fund_code = fund_code_mapping.get(fund_name.lower()) # Get fund code from mapping (case-insensitive)
@@ -177,14 +215,32 @@ def process_excel_data(mutual_funds_filepath): # Only accept mutual funds file p
                 else:
                     print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
 
-            fund_codes_for_transactions[fund_name] = fund_code # Store the found fund code (or None)
+            # Add or update the Fund table
+            fund_entry = db_session.query(Fund).filter_by(fund_name=fund_name).first()
+            if fund_entry:
+                if fund_code and not fund_entry.fund_code: # Update fund_code if it was missing
+                    fund_entry.fund_code = fund_code
+            else:
+                fund_entry = Fund(fund_name=fund_name, fund_code=fund_code)
+                db_session.add(fund_entry)
 
+            # Fetch and update current_nav if fund_code is available
+            if fund_entry.fund_code:
+                current_nav = fetch_current_nav(fund_entry.fund_code)
+                if current_nav is not None:
+                    fund_entry.current_nav = current_nav
+                    fund_entry.last_updated = datetime.datetime.now()
+                    print(f"Updated NAV for {fund_name} ({fund_entry.fund_code}): {current_nav}")
+                else:
+                    print(f"Could not fetch NAV for {fund_name} ({fund_entry.fund_code})")
+
+
+        db_session.commit() # Commit fund updates
 
         # Process Mutual Fund Transactions
         for index, row in mutual_funds_df.iterrows():
             # print(row) # Uncomment for debugging row data
             fund_name = row['Investment name']
-            fund_code = fund_codes_for_transactions.get(fund_name) # Get the fund code from the pre-fetched dictionary
 
             transaction_type = None
             amount = 0.0
@@ -217,12 +273,11 @@ def process_excel_data(mutual_funds_filepath): # Only accept mutual funds file p
                     amount=amount,
                     units=units,
                     nav=calculated_nav, # Use calculated NAV
-                    timestamp=row['Trade Date'],
-                    fund_code=fund_code # Save the fetched fund code
+                    timestamp=row['Trade Date']
                 )
                 db_session.add(transaction_entry)
 
-        db_session.commit()
+        db_session.commit() # Commit transaction updates
         return True
     except Exception as e:
         db_session.rollback()
@@ -282,9 +337,12 @@ def show_performance():
     fund_performance = {}
     transactions = MutualFundTransaction.query.order_by(MutualFundTransaction.timestamp).all()
 
+    # Fetch all funds to get fund_code and current_nav
+    funds = db_session.query(Fund).all()
+    fund_info = {fund.fund_name: {'fund_code': fund.fund_code, 'current_nav': fund.current_nav} for fund in funds}
+
     for transaction in transactions:
         fund_name = transaction.fund_name
-        fund_code = transaction.fund_code # Get fund code from the database
 
         if fund_name not in fund_performance:
             fund_performance[fund_name] = {
@@ -295,7 +353,8 @@ def show_performance():
                 'xirr_cash_flows': [], # For XIRR calculation [(amount, date)]
                 'cost_basis': 0.0, # For average cost basis tracking
                 'transactions': [],
-                'fund_code': fund_code # Store fund code in performance data
+                'fund_code': fund_info.get(fund_name, {}).get('fund_code'), # Get fund code from fund_info
+                'current_nav': fund_info.get(fund_name, {}).get('current_nav', 0.0) # Get current_nav from fund_info
             }
 
         fund_data = fund_performance[fund_name]
@@ -330,31 +389,34 @@ def show_performance():
     import requests
 
     for fund_name, fund_data in fund_performance.items():
-        # Fetch current NAV from mfapi.in using fund code from database
-        current_nav = 0.0
-        fund_code = fund_data.get('fund_code') # Get fund code from stored performance data
-
-        if fund_code:
-            api_url = f"https://api.mfapi.in/mf/{fund_code}/latest"
-            try:
-                response = requests.get(api_url)
-                response.raise_for_status() # Raise an exception for bad status codes
-                data = response.json()
-                if data and 'data' in data and data['data']:
-                    current_nav = float(data['data'][0]['nav'])
-            except requests.exceptions.RequestException as e:
-                print(f"Error fetching NAV for {fund_name} (code: {fund_code}): {e}")
-                # Fallback to latest NAV from transactions if API call fails
-                if fund_data['transactions']:
-                     current_nav = fund_data['transactions'][-1].nav
+        current_nav = fund_data['current_nav'] # Use current_nav from fund_info
+        # Calculate Unrealized Gains and XIRR
+        if fund_data['total_units'] > 0 and current_nav > 0:
+            current_value = fund_data['total_units'] * current_nav
+            # Unrealized gain is current value minus the remaining cost basis
+            remaining_cost_basis = fund_data['cost_basis']
+            fund_data['unrealized_gains'] = current_value - remaining_cost_basis
         else:
-            print(f"Fund code not available in database for {fund_name}")
-            # Fallback to latest NAV from transactions if fund code is not found in database
-            if fund_data['transactions']:
-                 current_nav = fund_data['transactions'][-1].nav
+             fund_data['unrealized_gains'] = 0.0 # No units or current NAV, no unrealized gain
 
-        # Add current_nav to the fund_performance dictionary
-        fund_data['current_nav'] = current_nav
+        # Calculate XIRR
+        if len(fund_data['xirr_cash_flows']) > 1 and current_nav > 0:
+            # Add the current value as a final cash flow at today's date for XIRR
+            today = datetime.date.today()
+            final_cash_flow_amount = fund_data['total_units'] * current_nav
+            xirr_values = [cf[0] for cf in fund_data['xirr_cash_flows']] + [final_cash_flow_amount]
+            xirr_dates = [cf[1] for cf in fund_data['xirr_cash_flows']] + [today]
+
+            try:
+                # Convert datetime objects to date objects for xirr
+                xirr_dates = [d.date() if isinstance(d, datetime.datetime) else d for d in xirr_dates]
+                fund_data['xirr'] = xirr(xirr_dates,xirr_values)
+            except Exception as e:
+                print(f"  Error calculating overall XIRR: {e}")
+                fund_data['xirr'] = 0.0 # Handle cases where XIRR cannot be calculated (e.g., no cash flows)
+        else:
+            print(f"XIRR not calculated for {fund_name}: Insufficient cash flows or current NAV <= 0")
+            fund_data['xirr'] = 0.0 # Not enough cash flows or current NAV to calculate XIRR
 
         # Calculate Unrealized Gains and XIRR
         if fund_data['total_units'] > 0 and current_nav > 0:
@@ -378,7 +440,7 @@ def show_performance():
                 xirr_dates = [d.date() if isinstance(d, datetime.datetime) else d for d in xirr_dates]
                 fund_data['xirr'] = xirr(xirr_dates,xirr_values)
             except Exception as e:
-                print(f"  Error calculating XIRR: {e}")
+                print(f"  Error calculating overall XIRR: {e}")
                 fund_data['xirr'] = 0.0 # Handle cases where XIRR cannot be calculated (e.g., no cash flows)
         else:
             print(f"XIRR not calculated for {fund_name}: Insufficient cash flows or current NAV <= 0")
@@ -515,26 +577,13 @@ def add_transaction():
         timestamp_str = request.form['timestamp']
         timestamp = datetime.datetime.fromisoformat(timestamp_str)
 
-        # Optional: Fetch fund_code if needed, similar to process_excel_data
-        fund_code_mapping = load_fund_codes()
-        fund_code = fund_code_mapping.get(fund_name.lower())
-        if not fund_code:
-             best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
-             if score > 80:
-                 fund_code = fund_code_mapping.get(best_match)
-                 print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
-             else:
-                 print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
-
-
         new_transaction = MutualFundTransaction(
             fund_name=fund_name,
             transaction_type=transaction_type,
             amount=amount,
             units=units,
             nav=nav,
-            timestamp=timestamp,
-            fund_code=fund_code
+            timestamp=timestamp
         )
         db_session.add(new_transaction)
         db_session.commit()
@@ -556,18 +605,6 @@ def edit_transaction(transaction_id):
             timestamp_str = request.form['timestamp']
             transaction.timestamp = datetime.datetime.fromisoformat(timestamp_str)
 
-            # Optional: Update fund_code if needed
-            fund_code_mapping = load_fund_codes()
-            fund_code = fund_code_mapping.get(transaction.fund_name.lower())
-            if not fund_code:
-                 best_match, score = process.extractOne(transaction.fund_name.lower(), fund_code_mapping.keys())
-                 if score > 80:
-                     fund_code = fund_code_mapping.get(best_match)
-                     print(f"Fuzzy matched '{transaction.fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
-                 else:
-                     print(f"Fund code not found for '{transaction.fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
-            transaction.fund_code = fund_code
-
             db_session.commit()
             return redirect(url_for('show_transactions')) # Redirect to transactions page
         except Exception as e:
@@ -579,34 +616,13 @@ def edit_transaction(transaction_id):
 def new_transaction():
     if request.method == 'POST':
         try:
-            fund_name = request.form['fund_name']
-            transaction_type = request.form['transaction_type']
-            amount = float(request.form['amount'])
-            units = float(request.form['units'])
-            nav = float(request.form['nav'])
-            timestamp_str = request.form['timestamp']
-            timestamp = datetime.datetime.fromisoformat(timestamp_str)
-
-            # Optional: Fetch fund_code if needed
-            fund_code_mapping = load_fund_codes()
-            fund_code = fund_code_mapping.get(fund_name.lower())
-            if not fund_code:
-                 best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
-                 if score > 80:
-                     fund_code = fund_code_mapping.get(best_match)
-                     print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
-                 else:
-                     print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
-
-
             new_transaction = MutualFundTransaction(
-                fund_name=fund_name,
-                transaction_type=transaction_type,
-                amount=amount,
-                units=units,
-                nav=nav,
-                timestamp=timestamp,
-                fund_code=fund_code
+                fund_name=request.form['fund_name'],
+                transaction_type=request.form['transaction_type'],
+                amount=float(request.form['amount']),
+                units=float(request.form['units']),
+                nav=float(request.form['nav']),
+                timestamp=datetime.datetime.fromisoformat(request.form['timestamp'])
             )
             db_session.add(new_transaction)
             db_session.commit()

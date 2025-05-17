@@ -37,7 +37,7 @@ th, td {
 }
 
 th {
-    background-color: #007bff;
+    background-color:#0056b3;
     color: white;
 }
 
@@ -52,6 +52,11 @@ tr:hover {
 /* DataTables specific hover effect */
 table.dataTable tbody tr:hover {
     background-color: #ddd; /* Use the same hover color */
+    
+}
+.dataTables_length, .dataTables_filter {
+margin-top: 20px;
+margin-bottom: 10px;
 }
 
 /* Form Styling */
@@ -90,7 +95,7 @@ form button[type="submit"] {
     display: block;
     width: 100%;
     padding: 10px;
-    background-color: #007bff;
+    background-color:#0056b3;
     color: white;
     border: none;
     border-radius: 4px;
@@ -101,4 +106,39 @@ form button[type="submit"] {
 
 form button[type="submit"]:hover {
     background-color: #0056b3;
+}
+
+button {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    background-color:#0056b3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+.card {
+/* Add shadows to create the "card" effect */
+box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
+border-radius: 5px;
+transition: 0.3s;
+background-color: #0056b3;color: whitesmoke;
+}
+
+/* On mouse-over, add a deeper shadow */
+.card:hover {
+box-shadow: 0 8px 16px 0 rgba(0,0,0,0.3);
+}
+
+/* Add some padding inside the card container */
+.cardcontent {
+padding: 2px 16px;
 }
