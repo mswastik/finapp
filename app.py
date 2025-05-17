@@ -11,6 +11,7 @@ import requests
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 from pyxirr import xirr
+import datetime
 #import io
 #import csv
 
@@ -383,7 +384,251 @@ def show_performance():
             print(f"XIRR not calculated for {fund_name}: Insufficient cash flows or current NAV <= 0")
             fund_data['xirr'] = 0.0 # Not enough cash flows or current NAV to calculate XIRR
 
-    return render_template('performance.html', fund_performance=fund_performance)
+    # Calculate total realized and unrealized gains
+    total_realized_gains = sum(fund['realized_gains'] for fund in fund_performance.values())
+    total_unrealized_gains = sum(fund['unrealized_gains'] for fund in fund_performance.values())
+
+    # Calculate overall XIRR
+    overall_xirr_cash_flows = []
+    for fund_data in fund_performance.values():
+        overall_xirr_cash_flows.extend(fund_data['xirr_cash_flows'])
+
+    overall_xirr = 0.0
+    if len(overall_xirr_cash_flows) > 1:
+        # Add the current total value as a final cash flow at today's date for overall XIRR
+        today = datetime.date.today()
+        total_current_value = sum(fund['total_units'] * fund['current_nav'] for fund in fund_performance.values() if fund['current_nav'] > 0)
+        overall_xirr_values = [cf[0] for cf in overall_xirr_cash_flows] + [total_current_value]
+        overall_xirr_dates = [cf[1] for cf in overall_xirr_cash_flows] + [today]
+
+        try:
+            # Convert datetime objects to date objects for xirr
+            overall_xirr_dates = [d.date() if isinstance(d, datetime.datetime) else d for d in overall_xirr_dates]
+            overall_xirr = xirr(overall_xirr_dates, overall_xirr_values)
+        except Exception as e:
+            print(f"  Error calculating overall XIRR: {e}")
+            overall_xirr = 0.0
+
+    # Calculate total realized and unrealized gains
+    total_realized_gains = sum(fund['realized_gains'] for fund in fund_performance.values())
+    total_unrealized_gains = sum(fund['unrealized_gains'] for fund in fund_performance.values())
+
+    # Calculate overall XIRR
+    overall_xirr_cash_flows = []
+    for fund_data in fund_performance.values():
+        overall_xirr_cash_flows.extend(fund_data['xirr_cash_flows'])
+
+    overall_xirr = 0.0
+    if len(overall_xirr_cash_flows) > 1:
+        # Add the current total value as a final cash flow at today's date for overall XIRR
+        today = datetime.date.today()
+        total_current_value = sum(fund['total_units'] * fund['current_nav'] for fund in fund_performance.values() if fund['current_nav'] > 0)
+        overall_xirr_values = [cf[0] for cf in overall_xirr_cash_flows] + [total_current_value]
+        overall_xirr_dates = [cf[1] for cf in overall_xirr_cash_flows] + [today]
+
+        try:
+            # Convert datetime objects to date objects for xirr
+            overall_xirr_dates = [d.date() if isinstance(d, datetime.datetime) else d for d in overall_xirr_dates]
+            overall_xirr = xirr(overall_xirr_dates, overall_xirr_values)
+        except Exception as e:
+            print(f"  Error calculating overall XIRR: {e}")
+            overall_xirr = 0.0
+
+    # --- Chart Data Preparation ---
+    portfolio_history = {}
+    fund_history = {fund_name: {} for fund_name in fund_performance.keys()}
+
+    all_dates = sorted(list(set([t.timestamp.date() for t in transactions])))
+    if not all_dates:
+        all_dates = [datetime.date.today()] # Ensure at least today's date if no transactions
+
+    # Initialize holdings and cost basis
+    current_holdings = {fund_name: 0.0 for fund_name in fund_performance.keys()}
+    current_cost_basis = {fund_name: 0.0 for fund_name in fund_performance.keys()}
+
+    # Iterate through dates and calculate portfolio value
+    for date in all_dates:
+        # Process transactions up to this date
+        transactions_on_date = [t for t in transactions if t.timestamp.date() == date]
+        for transaction in transactions_on_date:
+            fund_name = transaction.fund_name
+            if transaction.transaction_type.lower() == 'buy':
+                current_holdings[fund_name] += transaction.units
+                current_cost_basis[fund_name] += transaction.amount
+            elif transaction.transaction_type.lower() == 'sell':
+                 # Adjust cost basis for sells based on average cost
+                 if fund_performance[fund_name]['total_units'] > 0: # Use total units from initial calculation
+                     average_cost_per_unit = fund_performance[fund_name]['cost_basis'] / fund_performance[fund_name]['total_units']
+                     current_cost_basis[fund_name] -= average_cost_per_unit * transaction.units
+                 current_holdings[fund_name] -= transaction.units
+
+
+        # Fetch NAVs for this date (simplified: using latest available NAV)
+        # A more accurate approach would fetch historical NAVs for each date
+        current_navs = {fund_name: fund_performance[fund_name]['current_nav'] for fund_name in fund_performance.keys()} # Using latest NAV for simplicity
+
+        # Calculate portfolio value on this date
+        portfolio_value_on_date = 0
+        for fund_name, units in current_holdings.items():
+            if fund_name in current_navs and current_navs[fund_name] > 0:
+                 fund_value = units * current_navs[fund_name]
+                 portfolio_value_on_date += fund_value
+                 fund_history[fund_name][date.isoformat()] = fund_value # Store fund value history
+
+        portfolio_history[date.isoformat()] = portfolio_value_on_date # Store total portfolio value history
+
+    # Ensure today's value is included if not already
+    today_str = datetime.date.today().isoformat()
+    if today_str not in portfolio_history:
+         total_current_value = sum(fund['total_units'] * fund['current_nav'] for fund in fund_performance.values() if fund['current_nav'] > 0)
+         portfolio_history[today_str] = total_current_value
+         for fund_name, fund_data in fund_performance.items():
+              if fund_data['current_nav'] > 0:
+                   fund_history[fund_name][today_str] = fund_data['total_units'] * fund_data['current_nav']
+
+
+    # Sort history by date
+    sorted_portfolio_history = sorted(portfolio_history.items())
+    sorted_fund_history = {fund_name: sorted(history.items()) for fund_name, history in fund_history.items()}
+
+
+    return render_template('performance.html',
+                           fund_performance=fund_performance,
+                           total_realized_gains=total_realized_gains,
+                           total_unrealized_gains=total_unrealized_gains,
+                           overall_xirr=overall_xirr,
+                           portfolio_history=sorted_portfolio_history,
+                           fund_history=sorted_fund_history)
+
+@app.route('/update_database', methods=['GET'])
+def update_database_form():
+    return render_template('update_database.html')
+
+@app.route('/add_transaction', methods=['POST'])
+def add_transaction():
+    try:
+        fund_name = request.form['fund_name']
+        transaction_type = request.form['transaction_type']
+        amount = float(request.form['amount'])
+        units = float(request.form['units'])
+        nav = float(request.form['nav'])
+        timestamp_str = request.form['timestamp']
+        timestamp = datetime.datetime.fromisoformat(timestamp_str)
+
+        # Optional: Fetch fund_code if needed, similar to process_excel_data
+        fund_code_mapping = load_fund_codes()
+        fund_code = fund_code_mapping.get(fund_name.lower())
+        if not fund_code:
+             best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
+             if score > 80:
+                 fund_code = fund_code_mapping.get(best_match)
+                 print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
+             else:
+                 print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
+
+
+        new_transaction = MutualFundTransaction(
+            fund_name=fund_name,
+            transaction_type=transaction_type,
+            amount=amount,
+            units=units,
+            nav=nav,
+            timestamp=timestamp,
+            fund_code=fund_code
+        )
+        db_session.add(new_transaction)
+        db_session.commit()
+        return redirect(url_for('show_transactions')) # Redirect to transactions page
+    except Exception as e:
+        db_session.rollback()
+        return f"Error adding transaction: {e}", 500
+
+@app.route('/edit_transaction/<int:transaction_id>', methods=['GET', 'POST'])
+def edit_transaction(transaction_id):
+    transaction = MutualFundTransaction.query.get(transaction_id)
+    if request.method == 'POST':
+        try:
+            transaction.fund_name = request.form['fund_name']
+            transaction.transaction_type = request.form['transaction_type']
+            transaction.amount = float(request.form['amount'])
+            transaction.units = float(request.form['units'])
+            transaction.nav = float(request.form['nav'])
+            timestamp_str = request.form['timestamp']
+            transaction.timestamp = datetime.datetime.fromisoformat(timestamp_str)
+
+            # Optional: Update fund_code if needed
+            fund_code_mapping = load_fund_codes()
+            fund_code = fund_code_mapping.get(transaction.fund_name.lower())
+            if not fund_code:
+                 best_match, score = process.extractOne(transaction.fund_name.lower(), fund_code_mapping.keys())
+                 if score > 80:
+                     fund_code = fund_code_mapping.get(best_match)
+                     print(f"Fuzzy matched '{transaction.fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
+                 else:
+                     print(f"Fund code not found for '{transaction.fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
+            transaction.fund_code = fund_code
+
+            db_session.commit()
+            return redirect(url_for('show_transactions')) # Redirect to transactions page
+        except Exception as e:
+            db_session.rollback()
+            return f"Error updating transaction: {e}", 500
+    return render_template('update_database.html', transaction=transaction)
+
+@app.route('/new_transaction', methods=['GET', 'POST'])
+def new_transaction():
+    if request.method == 'POST':
+        try:
+            fund_name = request.form['fund_name']
+            transaction_type = request.form['transaction_type']
+            amount = float(request.form['amount'])
+            units = float(request.form['units'])
+            nav = float(request.form['nav'])
+            timestamp_str = request.form['timestamp']
+            timestamp = datetime.datetime.fromisoformat(timestamp_str)
+
+            # Optional: Fetch fund_code if needed
+            fund_code_mapping = load_fund_codes()
+            fund_code = fund_code_mapping.get(fund_name.lower())
+            if not fund_code:
+                 best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
+                 if score > 80:
+                     fund_code = fund_code_mapping.get(best_match)
+                     print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
+                 else:
+                     print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
+
+
+            new_transaction = MutualFundTransaction(
+                fund_name=fund_name,
+                transaction_type=transaction_type,
+                amount=amount,
+                units=units,
+                nav=nav,
+                timestamp=timestamp,
+                fund_code=fund_code
+            )
+            db_session.add(new_transaction)
+            db_session.commit()
+            return redirect(url_for('show_transactions')) # Redirect to transactions page
+        except Exception as e:
+            db_session.rollback()
+            return f"Error adding transaction: {e}", 500
+    return render_template('create_transaction.html')
+
+@app.route('/delete_transaction/<int:transaction_id>', methods=['POST'])
+def delete_transaction(transaction_id):
+    transaction = MutualFundTransaction.query.get(transaction_id)
+    if transaction:
+        try:
+            db_session.delete(transaction)
+            db_session.commit()
+            return redirect(url_for('show_transactions')) # Redirect to transactions page
+        except Exception as e:
+            db_session.rollback()
+            return f"Error deleting transaction: {e}", 500
+    return "Transaction not found", 404
+
 
 if __name__ == '__main__':
     # Create the upload folder if it doesn't exist

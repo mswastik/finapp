@@ -13,6 +13,14 @@
         <a href="/performance">Mutual Fund Performance</a>
     </nav>
     <h1>Mutual Fund Performance</h1>
+
+    <div>
+        <h2>Overall Portfolio Summary</h2>
+        <p>Total Realized Gains: {{ "%.2f" | format(total_realized_gains) }}</p>
+        <p>Total Unrealized Gains: {{ "%.2f" | format(total_unrealized_gains) }}</p>
+        <p>Overall XIRR: {{ "%.2f%%" | format(overall_xirr * 100) if overall_xirr is not none else 'N/A' }}</p>
+    </div>
+
     <table>
         <thead>
             <tr>
@@ -28,7 +36,7 @@
         </thead>
         <tbody>
             {% for fund_name, data in fund_performance.items() %}
-            <tr>
+            <tr style="cursor: pointer;">
                 <td>{{ fund_name }}</td>
                 <td>{{ "%.2f" | format(data.total_invested) }}</td>
                 <td>{{ "%.2f" | format(data.total_units * data.current_nav) if data.total_units > 0 and data.current_nav > 0 else "0.00" }}</td>
@@ -41,10 +49,82 @@
             {% endfor %}
         </tbody>
     </table>
+
+    <div id="performanceChart" style="width: 900px; height:500px;">
+    </div>
+
+    <script id="portfolio-history-data" type="application/json">{{ portfolio_history | tojson | safe }}</script>
+    <script id="fund-history-data" type="application/json">{{ fund_history | tojson | safe }}</script>
+
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script>
-$(document).ready( function () {
-    $('table').DataTable();
-} );
-</script>
+        $(document).ready(function () {
+            $('table').DataTable();
+
+            const portfolioHistory = JSON.parse(document.getElementById('portfolio-history-data').textContent);
+            const fundHistory = JSON.parse(document.getElementById('fund-history-data').textContent);
+            const chartDom = document.getElementById('performanceChart');
+            const myChart = echarts.init(document.getElementById('performanceChart'));
+
+            let option;
+
+            function renderChart(data, label) {
+                const chartData = data.map(item => [item[0], item[1]]);
+
+                option = {
+                    title: {
+                        text: label
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        show: true
+                    },
+                    xAxis: {
+                        type: 'time',
+                        axisLabel: {
+                            formatter: function (value) {
+                                const date = new Date(value);
+                                return date.toLocaleDateString();
+                            }
+                        }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: {
+                            formatter: function (value) {
+                                return value.toFixed(2);
+                            }
+                        }
+                    },
+                    series: [{
+                        name: label,
+                        type: 'line',
+                        data: chartData
+                    }]
+                };
+
+                myChart.setOption(option);
+
+            }
+
+            // Initial render: Total Portfolio Value
+            renderChart(portfolioHistory, 'Total Portfolio Value');
+
+            // Add click event listeners to table rows
+            $('table tbody tr').on('click', function () {
+                const fundName = $(this).find('td:first').text();
+                if (fundHistory[fundName]) {
+                    renderChart(fundHistory[fundName], fundName + ' Performance');
+                }
+            });
+
+            // Handle chart resizing
+            $(window).on('resize', function() {
+                if (myChart) {
+                    myChart.resize();
+                }
+            });
+        });
+    </script>
 </body>
 </html>

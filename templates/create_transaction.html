@@ -1,0 +1,49 @@
+<!doctype html>
+<title>Create New Transaction</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/">Upload Data</a> |
+        <a href="/balances">Account Balances</a> |
+        <a href="/transactions">Mutual Fund Transactions</a> |
+        <a href="/performance">Mutual Fund Performance</a>
+    </nav>
+    <h1>Create New Transaction</h1>
+    <form method="POST" action="{{ url_for('new_transaction') }}">
+        <div>
+            <label for="fund_name">Fund Name:</label>
+            <input type="text" id="fund_name" name="fund_name" required>
+        </div>
+        <div>
+            <label for="transaction_type">Transaction Type:</label>
+            <select id="transaction_type" name="transaction_type" required>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="DIVIDEND">DIVIDEND</option>
+            </select>
+        </div>
+        <div>
+            <label for="amount">Amount:</label>
+            <input type="number" id="amount" name="amount" step="0.01" required>
+        </div>
+        <div>
+            <label for="units">Units:</label>
+            <input type="number" id="units" name="units" step="0.00001" required>
+        </div>
+        <div>
+            <label for="nav">NAV:</label>
+            <input type="number" id="nav" name="nav" step="0.0001" required>
+        </div>
+        <div>
+            <label for="timestamp">Timestamp:</label>
+            <input type="datetime-local" id="timestamp" name="timestamp" required>
+        </div>
+        <div>
+            <label for="fund_code">Fund Code:</label>
+            <input type="text" id="fund_code" name="fund_code">
+        </div>
+        <button type="submit">Create Transaction</button>
+    </form>
+</body>
+</html>
