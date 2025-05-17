@@ -1,49 +1,40 @@
-<!doctype html>
-<title>Create New Transaction</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <nav class="top-nav">
-        <a href="/">Upload Data</a> |
-        <a href="/balances">Account Balances</a> |
-        <a href="/transactions">Mutual Fund Transactions</a> |
-        <a href="/performance">Mutual Fund Performance</a>
-    </nav>
+{% extends "base.html" %}
+{% block title %}Create New Transaction{% endblock %}
+{% block content %}
     <h1>Create New Transaction</h1>
     <form method="POST" action="{{ url_for('new_transaction') }}">
-        <div>
+        <div class="form-group">
             <label for="fund_name">Fund Name:</label>
-            <input type="text" id="fund_name" name="fund_name" required>
+            <input type="text" class="form-control" id="fund_name" name="fund_name" required>
         </div>
-        <div>
+        <div class="form-group">
             <label for="transaction_type">Transaction Type:</label>
-            <select id="transaction_type" name="transaction_type" required>
+            <select class="form-control" id="transaction_type" name="transaction_type" required>
                 <option value="Buy">Buy</option>
                 <option value="Sell">Sell</option>
                 <option value="DIVIDEND">DIVIDEND</option>
             </select>
         </div>
-        <div>
+        <div class="form-group">
             <label for="amount">Amount:</label>
-            <input type="number" id="amount" name="amount" step="0.01" required>
+            <input type="number" class="form-control" id="amount" name="amount" step="0.01" required>
         </div>
-        <div>
+        <div class="form-group">
             <label for="units">Units:</label>
-            <input type="number" id="units" name="units" step="0.00001" required>
+            <input type="number" class="form-control" id="units" name="units" step="0.00001" required>
         </div>
-        <div>
+        <div class="form-group">
             <label for="nav">NAV:</label>
-            <input type="number" id="nav" name="nav" step="0.0001" required>
+            <input type="number" class="form-control" id="nav" name="nav" step="0.0001" required>
         </div>
-        <div>
+        <div class="form-group">
             <label for="timestamp">Timestamp:</label>
-            <input type="datetime-local" id="timestamp" name="timestamp" required>
+            <input type="datetime-local" class="form-control" id="timestamp" name="timestamp" required>
         </div>
-        <div>
+        <div class="form-group">
             <label for="fund_code">Fund Code:</label>
-            <input type="text" id="fund_code" name="fund_code">
+            <input type="text" class="form-control" id="fund_code" name="fund_code">
         </div>
-        <button type="submit">Create Transaction</button>
+        <button type="submit" class="btn btn-primary">Create Transaction</button>
     </form>
-</body>
-</html>
+{% endblock %}

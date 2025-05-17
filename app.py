@@ -1,9 +1,9 @@
 import os
-from flask import Flask, request, redirect, url_for, render_template
+from flask import Flask, request, redirect, url_for, render_template, flash, get_flashed_messages
 from werkzeug.utils import secure_filename
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, inspect
+from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
+#from sqlalchemy.ext.declarative import declarative_base
 import pandas as pd
 import sys
 import json
@@ -12,6 +12,8 @@ from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 from pyxirr import xirr
 import datetime
+from sqlalchemy import text,func
+
 #import io
 #import csv
 
@@ -23,6 +25,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'super secret key' # Replace with a real secret key
 
 engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
 db_session = scoped_session(sessionmaker(autocommit=False,
@@ -107,21 +110,30 @@ def fetch_current_nav(fund_code):
 def init_db():
     Base.metadata.create_all(bind=engine)
 
+
 # Define database models
 class AccountBalance(Base):
     __tablename__ = 'account_balances'
     id = Column(Integer, primary_key=True)
-    account_name = Column(String(120), unique=False, nullable=False)
-    balance = Column(Float, nullable=False)
-    timestamp = Column(DateTime, nullable=False)
+    bank = Column(String(120), unique=False, nullable=True)
+    date = Column(DateTime, nullable=False) # Corresponds to 'Date'
+    narration = Column(String(255), unique=False, nullable=True)
+    chq_ref_no = Column(String(120), unique=False, nullable=True)
+    withdrawal_amt = Column(Float, nullable=True)
+    deposit_amt = Column(Float, nullable=True)
+    closing_balance = Column(Float, nullable=False) # Corresponds to 'Closing Balance'
 
-    def __init__(self, account_name=None, balance=None, timestamp=None):
-        self.account_name = account_name
-        self.balance = balance
-        self.timestamp = timestamp
+    def __init__(self, bank=None, date=None, narration=None, chq_ref_no=None, withdrawal_amt=None, deposit_amt=None, closing_balance=None):
+        self.bank = bank
+        self.date = date
+        self.narration = narration
+        self.chq_ref_no = chq_ref_no
+        self.withdrawal_amt = withdrawal_amt
+        self.deposit_amt = deposit_amt
+        self.closing_balance = closing_balance
 
     def __repr__(self):
-        return '<AccountBalance %r>' % (self.account_name)
+        return '<AccountBalance %r>' % (self.bank)
 
 class Fund(Base):
     __tablename__ = 'funds'
@@ -161,124 +173,150 @@ class MutualFundTransaction(Base):
     def __repr__(self):
         return '<MutualFundTransaction %r>' % (self.fund_name)
 
+class FixedDeposit(Base):
+    __tablename__ = 'fixed_deposits'
+    id = Column(Integer, primary_key=True)
+    bank = Column(String(120), nullable=False)
+    amount = Column(Float, nullable=False)
+    interest_rate = Column(Float, nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    maturity_date = Column(DateTime, nullable=False)
+    total_interest_earned = Column(Float, nullable=True, default=0.0) # Field for tracking interest
+    status = Column(String(50), nullable=False, default='open') # New field for status (open, closed, matured)
+    closure_date = Column(DateTime, nullable=True) # New field for closure/maturity date
+
+    def __init__(self, bank=None, amount=None, interest_rate=None, start_date=None, maturity_date=None, total_interest_earned=0.0, status='open', closure_date=None):
+        self.bank = bank
+        self.amount = amount
+        self.interest_rate = interest_rate
+        self.start_date = start_date
+        self.maturity_date = maturity_date
+        self.total_interest_earned = total_interest_earned
+        self.status = status
+        self.closure_date = closure_date
+
+    def __repr__(self):
+        return '<FixedDeposit %r>' % (self.bank)
+
 # Helper function to process the uploaded Excel files
-def process_excel_data(mutual_funds_filepath): # Only accept mutual funds file path
+def process_excel_data(mutual_funds_filepath, account_balances_filepath): # Only accept mutual funds file path
     try:
-        try:
-            # Read Mutual Fund Transactions
-            mutual_funds_xls = pd.ExcelFile(mutual_funds_filepath, engine='openpyxl')
-            mutual_funds_df = mutual_funds_xls.parse('SWASTIK_9469790', skiprows=3) # Read from the specified sheet name and skip header rows
+        if mutual_funds_filepath!='':
+            try:
+                # Read Mutual Fund Transactions
+                mutual_funds_xls = pd.ExcelFile(mutual_funds_filepath, engine='openpyxl')
+                mutual_funds_df = mutual_funds_xls.parse('SWASTIK_9469790', skiprows=3) # Read from the specified sheet name and skip header rows
+                mutual_funds_df['Trade Date'] = pd.to_datetime(mutual_funds_df['Trade Date'])
+                fund_code_mapping = load_fund_codes()
+                fund_code_mapping = load_fund_codes()
+                unique_fund_names = mutual_funds_df['Investment name'].unique()
 
-            # Convert 'Trade Date' to datetime objects
-            mutual_funds_df['Trade Date'] = pd.to_datetime(mutual_funds_df['Trade Date'])
+                for fund_name in unique_fund_names:
+                    fund_code = fund_code_mapping.get(fund_name.lower()) # Get fund code from mapping (case-insensitive)
 
-        except Exception as e:
-            print(f"Error reading Excel file: {e}")
-            return False
+                    if not fund_code:
+                        # If direct match not found, try fuzzy matching
+                        best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
+                        if score > 80: # Use a threshold, e.g., 80
+                            fund_code = fund_code_mapping.get(best_match)
+                            print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
+                        else:
+                            print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
+
+                    # Add or update the Fund table
+                    fund_entry = db_session.query(Fund).filter_by(fund_name=fund_name).first()
+                    if fund_entry:
+                        if fund_code and not fund_entry.fund_code: # Update fund_code if it was missing
+                            fund_entry.fund_code = fund_code
+                    else:
+                        fund_entry = Fund(fund_name=fund_name, fund_code=fund_code)
+                        db_session.add(fund_entry)
+
+                    # Fetch and update current_nav if fund_code is available
+                    if fund_entry.fund_code:
+                        current_nav = fetch_current_nav(fund_entry.fund_code)
+                        if current_nav is not None:
+                            fund_entry.current_nav = current_nav
+                            fund_entry.last_updated = datetime.datetime.now()
+                            print(f"Updated NAV for {fund_name} ({fund_entry.fund_code}): {current_nav}")
+                        else:
+                            print(f"Could not fetch NAV for {fund_name} ({fund_entry.fund_code})")
+
+
+                db_session.commit() # Commit fund updates
+
+                # Process Mutual Fund Transactions
+                for index, row in mutual_funds_df.iterrows():
+                    fund_name = row['Investment name']
+
+                    transaction_type = None
+                    amount = 0.0
+                    units = 0.0
+                    nav = 0.0 # NAV is missing, setting to 0 for now
+
+                    if row.get('Buy units', 0) > 0:
+                        transaction_type = 'Buy'
+                        units = row['Buy units']
+                        amount = row.get('Cash inflow', 0)
+                    elif row.get('Sell units', 0) > 0:
+                        transaction_type = 'Sell'
+                        units = row['Sell units']
+                        amount = row.get('Cash outflow', 0)
+                    elif row.get('Dividend reinvested units', 0) > 0:
+                        transaction_type = 'Buy' # Reinvestment is a form of buying units
+                        units = row['Dividend reinvested units']
+                        amount = row.get('Dividend Amount', 0)
+
+                    calculated_nav = 0.0
+                    if units != 0:
+                        # Use absolute value of amount for NAV calculation for sell transactions
+                        nav_amount = abs(amount) if transaction_type == 'Sell' else amount
+                        calculated_nav = nav_amount / units
+
+                    if transaction_type: # Only process if a transaction type is determined
+                        transaction_entry = MutualFundTransaction(
+                            fund_name=fund_name,
+                            transaction_type=transaction_type,
+                            amount=amount,
+                            units=units,
+                            nav=calculated_nav, # Use calculated NAV
+                            timestamp=row['Trade Date']
+                        )
+                        db_session.add(transaction_entry)
+
+                db_session.commit() # Commit transaction updates
+                return True
+
+            except Exception as e:
+                print(f"Error reading Excel file: {e}")
+                return False
 
         # Account Balances processing (commented out as per user request)
-        # try:
-        #     account_balances_xls = pd.ExcelFile(account_balances_filepath, engine='openpyxl')
-        #     account_balances_df = account_balances_xls.parse('Account Balances')
-        #     for index, row in account_balances_df.iterrows():
-        #         balance_entry = AccountBalance(
-        #             account_name=row['Account Name'],
-        #             balance=row['Balance'],
-        #             timestamp=row['Timestamp'] # Assuming timestamp is in a suitable format
-        #         )
-        #         db_session.add(balance_entry)
-        # except Exception as e:
-        #     print(f"Error processing Account Balances file: {e}")
-        #     # Decide how to handle this error - continue with mutual funds or return False?
-        #     # For now, let's continue with mutual funds processing
-        #     pass
-
-
-        # Load fund codes mapping for processing
-        fund_code_mapping = load_fund_codes()
-
-        # Load fund codes mapping for processing
-        fund_code_mapping = load_fund_codes()
-
-        # Get unique fund names and find their codes once, and add/update Fund table
-        unique_fund_names = mutual_funds_df['Investment name'].unique()
-
-        for fund_name in unique_fund_names:
-            fund_code = fund_code_mapping.get(fund_name.lower()) # Get fund code from mapping (case-insensitive)
-
-            if not fund_code:
-                # If direct match not found, try fuzzy matching
-                best_match, score = process.extractOne(fund_name.lower(), fund_code_mapping.keys())
-                if score > 80: # Use a threshold, e.g., 80
-                    fund_code = fund_code_mapping.get(best_match)
-                    print(f"Fuzzy matched '{fund_name}' to '{best_match}' with score {score}. Using code {fund_code}")
-                else:
-                    print(f"Fund code not found for '{fund_name}' and no good fuzzy match found (best match: '{best_match}', score: {score})")
-
-            # Add or update the Fund table
-            fund_entry = db_session.query(Fund).filter_by(fund_name=fund_name).first()
-            if fund_entry:
-                if fund_code and not fund_entry.fund_code: # Update fund_code if it was missing
-                    fund_entry.fund_code = fund_code
-            else:
-                fund_entry = Fund(fund_name=fund_name, fund_code=fund_code)
-                db_session.add(fund_entry)
-
-            # Fetch and update current_nav if fund_code is available
-            if fund_entry.fund_code:
-                current_nav = fetch_current_nav(fund_entry.fund_code)
-                if current_nav is not None:
-                    fund_entry.current_nav = current_nav
-                    fund_entry.last_updated = datetime.datetime.now()
-                    print(f"Updated NAV for {fund_name} ({fund_entry.fund_code}): {current_nav}")
-                else:
-                    print(f"Could not fetch NAV for {fund_name} ({fund_entry.fund_code})")
-
-
-        db_session.commit() # Commit fund updates
-
-        # Process Mutual Fund Transactions
-        for index, row in mutual_funds_df.iterrows():
-            # print(row) # Uncomment for debugging row data
-            fund_name = row['Investment name']
-
-            transaction_type = None
-            amount = 0.0
-            units = 0.0
-            nav = 0.0 # NAV is missing, setting to 0 for now
-
-            if row.get('Buy units', 0) > 0:
-                transaction_type = 'Buy'
-                units = row['Buy units']
-                amount = row.get('Cash inflow', 0)
-            elif row.get('Sell units', 0) > 0:
-                transaction_type = 'Sell'
-                units = row['Sell units']
-                amount = row.get('Cash outflow', 0)
-            elif row.get('Dividend reinvested units', 0) > 0:
-                 transaction_type = 'Buy' # Reinvestment is a form of buying units
-                 units = row['Dividend reinvested units']
-                 amount = row.get('Dividend Amount', 0)
-
-            calculated_nav = 0.0
-            if units != 0:
-                # Use absolute value of amount for NAV calculation for sell transactions
-                nav_amount = abs(amount) if transaction_type == 'Sell' else amount
-                calculated_nav = nav_amount / units
-
-            if transaction_type: # Only process if a transaction type is determined
-                transaction_entry = MutualFundTransaction(
-                    fund_name=fund_name,
-                    transaction_type=transaction_type,
-                    amount=amount,
-                    units=units,
-                    nav=calculated_nav, # Use calculated NAV
-                    timestamp=row['Trade Date']
-                )
-                db_session.add(transaction_entry)
-
-        db_session.commit() # Commit transaction updates
-        return True
+        if account_balances_filepath!='':
+            try:
+                account_balances_df = pd.read_excel(account_balances_filepath, engine='openpyxl')
+                account_balances_df['Date'] = pd.to_datetime(account_balances_df['Date'])
+                account_balances_df['Date'] = pd.to_datetime(account_balances_df['Date'])
+                #account_balances_xls = pd.ExcelFile(account_balances_filepath, engine='openpyxl')
+                #account_balances_df = account_balances_xls.parse('Account Balances')
+                for index, row in account_balances_df.iterrows():
+                    balance_entry = AccountBalance(
+                        bank=row['Bank'],
+                        closing_balance=row['Closing Balance'],
+                        date=row['Date'],
+                        narration=row['Narration'],
+                        chq_ref_no=row['Chq./Ref.No.'],
+                        withdrawal_amt=row['Withdrawal Amt.'],
+                        deposit_amt=row['Deposit Amt.'],
+                    )
+                    db_session.add(balance_entry)
+                db_session.commit()
+                return True
+            except Exception as e:
+                print(f"Error processing Account Balances file: {e}")
+                # Decide how to handle this error - continue with mutual funds or return False?
+                # For now, let's continue with mutual funds processing
+                return False
     except Exception as e:
         db_session.rollback()
         print(f"Error processing Excel file: {e}")
@@ -304,28 +342,77 @@ def upload_file():
         if mutual_funds_file.filename == '' and account_balances_file.filename == '':
             return "One or both files have no selected file", 400
 
-        if mutual_funds_file and allowed_file(mutual_funds_file.filename): # and account_balances_file and allowed_file(account_balances_file.filename):
+        if mutual_funds_file and allowed_file(mutual_funds_file.filename):
             mutual_funds_filename = secure_filename(mutual_funds_file.filename)
-            #account_balances_filename = secure_filename(account_balances_file.filename)
-
             mutual_funds_filepath = os.path.join(app.config['UPLOAD_FOLDER'], mutual_funds_filename)
-            #account_balances_filepath = os.path.join(app.config['UPLOAD_FOLDER'], account_balances_filename)
-
             mutual_funds_file.save(mutual_funds_filepath)
-            #account_balances_file.save(account_balances_filepath)
-
-            if process_excel_data(mutual_funds_filepath): #, account_balances_filepath):
-                return 'Files successfully uploaded and data processed'
+            
+            if process_excel_data(mutual_funds_filepath,''): #, account_balances_filepath):
+                flash('Files successfully uploaded and data processed', 'success')
             else:
-                return 'Files uploaded but data processing failed'
+                flash('Files uploaded but data processing failed', 'danger')
+            return redirect(url_for('upload_file')) # Redirect back to the upload page
+        elif account_balances_file and allowed_file(account_balances_file.filename):
+            account_balances_filename = secure_filename(account_balances_file.filename)
+            account_balances_filepath = os.path.join(app.config['UPLOAD_FOLDER'], account_balances_filename)
+            account_balances_file.save(account_balances_filepath)
+            if process_excel_data('',account_balances_filepath):
+                flash('Files successfully uploaded and data processed', 'success')
+            else:
+                flash('Files uploaded but data processing failed', 'danger')
+            return redirect(url_for('upload_file')) # Redirect back to the upload page
         else:
-            return 'Invalid file type for one or both files'
-    return render_template('index.html')
+            flash('Invalid file type for one or both files', 'danger')
+            return redirect(url_for('upload_file')) # Redirect back to the upload page
+
+    # Fetch latest account balance
+    latest_balance_entry = db_session.query(AccountBalance).order_by(AccountBalance.date.desc()).first()
+    latest_balance = latest_balance_entry.closing_balance if latest_balance_entry else 0
+
+    # Calculate total current value of mutual funds
+    fund_performance = {}
+    transactions = MutualFundTransaction.query.order_by(MutualFundTransaction.timestamp).all()
+    funds = db_session.query(Fund).all()
+    fund_info = {fund.fund_name: {'fund_code': fund.fund_code, 'current_nav': fund.current_nav} for fund in funds}
+
+    for transaction in transactions:
+        fund_name = transaction.fund_name
+        if fund_name not in fund_performance:
+            fund_performance[fund_name] = {
+                'total_units': 0,
+                'current_nav': fund_info.get(fund_name, {}).get('current_nav', 0.0)
+            }
+        if transaction.transaction_type.lower() == 'buy':
+            fund_performance[fund_name]['total_units'] += transaction.units
+        elif transaction.transaction_type.lower() == 'sell':
+            fund_performance[fund_name]['total_units'] -= transaction.units
+
+    total_mutual_fund_value = sum(fund['total_units'] * fund['current_nav'] for fund in fund_performance.values() if fund['current_nav'] is not None)
+
+    # Calculate total fixed deposit amount
+    total_fixed_deposit_amount = db_session.query(func.sum(FixedDeposit.amount)).scalar() or 0
+
+    # Calculate total portfolio net worth
+    total_net_worth = latest_balance + total_mutual_fund_value + total_fixed_deposit_amount
+
+    return render_template('index.html', latest_balance=int(latest_balance), total_mutual_fund_value=int(total_mutual_fund_value), total_fixed_deposit_amount=int(total_fixed_deposit_amount), total_net_worth=int(total_net_worth))
 
 @app.route('/balances')
 def show_balances():
-    account_balances = AccountBalance.query.order_by(AccountBalance.timestamp.desc()).all()
-    return render_template('balances.html', account_balances=account_balances)
+    account_balances = AccountBalance.query.order_by(AccountBalance.date.asc()) # Order by date ascending for chart
+    acdf= pd.read_sql(account_balances.statement, account_balances.session.bind)
+    acdf = acdf.sort_values('date')
+    acdf['month'] = acdf['date'].dt.to_period('M')
+    acdf=acdf.groupby(['bank','month']).last().reset_index()[['bank','month','closing_balance']]
+    account_balances_data = []
+    for i,balance in acdf.iterrows():
+        print(balance)
+        account_balances_data.append({
+            'date': balance.month.strftime('%Y-%m-%d'), # Format date as string
+            'closing_balance': balance.closing_balance,
+            'bank': balance.bank
+        })
+    return render_template('balances.html', account_balances=db_session.execute(text('SELECT bank, MAX(date) as date, closing_balance FROM account_balances GROUP BY bank')), account_balances_data=account_balances_data)
 
 @app.route('/transactions')
 def show_transactions():
@@ -644,6 +731,111 @@ def delete_transaction(transaction_id):
             db_session.rollback()
             return f"Error deleting transaction: {e}", 500
     return "Transaction not found", 404
+
+@app.route('/fixed_deposits', methods=['GET'])
+def show_fixed_deposits():
+    # Retrieve all fixed deposits, regardless of status
+    fixed_deposits = FixedDeposit.query.order_by(FixedDeposit.maturity_date.asc()).all()
+    return render_template('fixed_deposits.html', fixed_deposits=fixed_deposits)
+
+@app.route('/new_fixed_deposit', methods=['GET', 'POST'])
+def new_fixed_deposit():
+    if request.method == 'POST':
+        try:
+            new_fd = FixedDeposit(
+                bank=request.form['bank'],
+                amount=float(request.form['amount']),
+                interest_rate=float(request.form['interest_rate']),
+                start_date=datetime.datetime.fromisoformat(request.form['start_date'])
+            )
+
+            duration = int(request.form['duration'])
+            duration_unit = request.form['duration_unit']
+            start_date = new_fd.start_date
+
+            # Calculate maturity date based on duration unit
+            if duration_unit == 'years':
+                maturity_date = start_date + datetime.timedelta(days=duration * 365.25) # Approximate years
+            elif duration_unit == 'months':
+                # This is a simplified approach for months, a more robust solution might be needed
+                maturity_date = start_date + datetime.timedelta(days=duration * 30.44) # Approximate months
+            elif duration_unit == 'days':
+                maturity_date = start_date + datetime.timedelta(days=duration)
+            else:
+                return "Invalid duration unit", 400 # Should not happen with dropdown
+
+            new_fd.maturity_date = maturity_date
+
+            db_session.add(new_fd)
+            db_session.commit()
+            flash('Fixed Deposit added successfully!', 'success')
+            return redirect(url_for('show_fixed_deposits'))
+        except Exception as e:
+            db_session.rollback()
+            flash(f"Error adding fixed deposit: {e}", 'danger')
+            return f"Error adding fixed deposit: {e}", 500
+    return render_template('create_fixed_deposit.html')
+
+@app.route('/edit_fixed_deposit/<int:fd_id>', methods=['GET', 'POST'])
+def edit_fixed_deposit(fd_id):
+    fd = FixedDeposit.query.get(fd_id)
+    if request.method == 'POST':
+        try:
+            fd.bank = request.form['bank']
+            fd.amount = float(request.form['amount'])
+            fd.interest_rate = float(request.form['interest_rate'])
+            fd.start_date = datetime.datetime.fromisoformat(request.form['start_date'])
+            fd.maturity_date = datetime.datetime.fromisoformat(request.form['maturity_date'])
+
+            db_session.commit()
+            return redirect(url_for('show_fixed_deposits'))
+        except Exception as e:
+            db_session.rollback()
+            return f"Error updating fixed deposit: {e}", 500
+    return render_template('edit_fixed_deposit.html', fd=fd)
+
+@app.route('/delete_fixed_deposit/<int:fd_id>', methods=['POST'])
+def delete_fixed_deposit(fd_id):
+    fd = FixedDeposit.query.get(fd_id)
+    if fd:
+        try:
+            db_session.delete(fd)
+            db_session.commit()
+            return redirect(url_for('show_fixed_deposits'))
+        except Exception as e:
+            db_session.rollback()
+            return f"Error deleting fixed deposit: {e}", 500
+    return "Fixed Deposit not found", 404
+
+@app.route('/close_fixed_deposit/<int:fd_id>', methods=['POST'])
+def close_fixed_deposit(fd_id):
+    fd = FixedDeposit.query.get(fd_id)
+    if fd:
+        try:
+            # Calculate interest earned
+            # Assuming simple interest for the duration from start_date to closure_date
+            # If compounding is needed, a more complex calculation is required.
+            # For simplicity, using today's date as the closure date for calculation
+            closure_date = datetime.datetime.now()
+            duration_days = (closure_date - fd.start_date).days
+            # Simple interest formula: Principal * Rate * Time / 100
+            # Time in years = duration_days / 365.25 (to account for leap years)
+            time_years = duration_days / 365.25
+            total_interest = (fd.amount * fd.interest_rate * time_years) / 100
+
+            fd.total_interest_earned = total_interest
+            fd.status = 'closed' # Or 'matured' if closure_date >= maturity_date
+            fd.closure_date = closure_date
+
+            db_session.commit()
+            flash(f'Fixed Deposit {fd_id} closed successfully. Interest earned: {total_interest:.2f}', 'success')
+            return redirect(url_for('show_fixed_deposits'))
+        except Exception as e:
+            db_session.rollback()
+            flash(f"Error closing fixed deposit {fd_id}: {e}", 'danger')
+            return redirect(url_for('show_fixed_deposits'))
+    flash(f"Fixed Deposit {fd_id} not found", 'danger')
+    return "Fixed Deposit not found", 404
 
 
 if __name__ == '__main__':
