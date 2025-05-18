@@ -2,20 +2,22 @@
 {% block title %}Mutual Fund Performance{% endblock %}
 {% block content %}
     <h1>Finance Management Webapp</h1>
-    <div class="card1">
-      <div style="display: flex;flex-direction: row;">
-        <div class="cardcontent">
-            <h2 style="color: whitesmoke;">Summary</h2>
-            <p class="mt-0">Latest Account Balance: <b style="font-size: 1.5em;">{{ latest_balance }}</b></p>
-            <p class="mt-0">Total Mutual Fund Value:  <b style="font-size: 1.5em;">{{ total_mutual_fund_value }}</b></p>
-            {% if total_fixed_deposit_amount is not none %}
-            <p class="mt-0">Total Fixed Deposit Amount: <b style="font-size: 1.5em;">{{ total_fixed_deposit_amount }}</b></p>
-            {% endif %}
+
+    <div class="card">
+        <div class="card-header">Summary</div>
+        <div class="card-content" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+            <div>
+                <p>Savings Account Balance: <b>{{ latest_balance }}</b></p>
+                <p>Total Mutual Fund Value: <b>{{ total_mutual_fund_value }}</b></p>
+                {% if total_fixed_deposit_amount is not none %}
+                <p>Total Fixed Deposit Amount: <b>{{ total_fixed_deposit_amount }}</b></p>
+                {% endif %}
+            </div>
+            <p class="networth">Net Worth <br><b>{{ total_net_worth }}</b></p>
         </div>
-      <p class="networth">Net Worth <br><b style="font-size: 2.5em;">{{ total_net_worth }}</b></p>
     </div>
-    </div>
-    <h3 class="mt-4">Upload New Files</h3>
+
+    <h3>Upload New Files</h3>
     <form method=post enctype=multipart/form-data>
       <div>
         <label for="mutual_funds_file">Mutual Funds File:</label>
@@ -25,7 +27,7 @@
         <label for="account_balances_file">Account Balances File:</label>
         <input type="file" name="account_balances_file" id="account_balances_file">
       </div>
-      <input type=submit value=Upload>
+      <button type="submit">Upload</button>
     </form>
 
     {% with messages = get_flashed_messages(with_categories=true) %}

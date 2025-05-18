@@ -5,23 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{% block title %}{% endblock %} - Finance App</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 </head>
 <body>
-    <nav class="top-nav m-3">
-        <a href="/">Home</a> |
-        <a href="/balances">Account Balances</a> |
-        <a href="/transactions">Mutual Fund Transactions</a> |
-        <a href="/performance">Mutual Fund Performance</a> |
-        <a href="/fixed_deposits">Fixed Deposits</a> |
-        <a href="{{ url_for('update_database_form') }}">Update Database</a>
+    <nav>
+        <div class="container">
+            <span class="site-title">Finance App</span>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/balances">Account Balances</a>
+                <a href="/transactions">Mutual Fund Transactions</a>
+                <a href="/performance">Mutual Fund Performance</a>
+                <a href="/fixed_deposits">Fixed Deposits</a>
+                <a href="{{ url_for('update_database_form') }}">Update Database</a>
+            </div>
+        </div>
     </nav>
-    <div class="container mt-4">
+    <div class="container">
         {% block content %}{% endblock %}
     </div>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.css">
     <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>

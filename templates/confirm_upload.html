@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Confirm Upload{% endblock %}
+{% block content %}
+<h1>Confirm Upload</h1>
+
+<h2>Mutual Fund Transactions</h2>
+<h3>Last Few Entries</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Fund Name</th>
+            <th>Transaction Type</th>
+            <th>Amount</th>
+            <th>Units</th>
+            <th>NAV</th>
+            <th>Timestamp</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in last_mutual_fund_transactions %}
+        <tr>
+            <td data-label="Fund Name">{{ t.fund_name }}</td>
+            <td data-label="Transaction Type">{{ t.transaction_type }}</td>
+            <td data-label="Amount">{{ t.amount }}</td>
+            <td data-label="Units">{{ t.units }}</td>
+            <td data-label="NAV">{{ t.nav }}</td>
+            <td data-label="Timestamp">{{ t.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>New Entries to be Added</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Fund Name</th>
+            <th>Transaction Type</th>
+            <th>Amount</th>
+            <th>Units</th>
+            <th>NAV</th>
+            <th>Timestamp</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in new_mutual_fund_transactions %}
+        <tr>
+            <td data-label="Fund Name">{{ t.fund_name }}</td>
+            <td data-label="Transaction Type">{{ t.transaction_type }}</td>
+            <td data-label="Amount">{{ t.amount }}</td>
+            <td data-label="Units">{{ t.units }}</td>
+            <td data-label="NAV">{{ t.nav }}</td>
+            <td data-label="Timestamp">{{ t.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2>Account Balances</h2>
+<h3>Last Few Entries</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Bank</th>
+            <th>Closing Balance</th>
+            <th>Date</th>
+            <th>Narration</th>
+            <th>Cheque/Ref No.</th>
+            <th>Withdrawal Amount</th>
+            <th>Deposit Amount</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for b in last_account_balances %}
+        <tr>
+            <td data-label="Bank">{{ b.bank }}</td>
+            <td data-label="Closing Balance">{{ b.closing_balance }}</td>
+            <td data-label="Date">{{ b.date }}</td>
+            <td data-label="Narration">{{ b.narration }}</td>
+            <td data-label="Cheque/Ref No.">{{ b.chq_ref_no }}</td>
+            <td data-label="Withdrawal Amount">{{ b.withdrawal_amt }}</td>
+            <td data-label="Deposit Amount">{{ b.deposit_amt }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>New Entries to be Added</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Bank</th>
+            <th>Closing Balance</th>
+            <th>Date</th>
+            <th>Narration</th>
+            <th>Cheque/Ref No.</th>
+            <th>Withdrawal Amount</th>
+            <th>Deposit Amount</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for b in new_account_balances %}
+        <tr>
+            <td data-label="Bank">{{ b.bank }}</td>
+            <td data-label="Closing Balance">{{ b.closing_balance }}</td>
+            <td data-label="Date">{{ b.date }}</td>
+            <td data-label="Narration">{{ b.narration }}</td>
+            <td data-label="Cheque/Ref No.">{{ b.chq_ref_no }}</td>
+            <td data-label="Withdrawal Amount">{{ b.withdrawal_amt }}</td>
+            <td data-label="Deposit Amount">{{ b.deposit_amt }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<form method="post" action="{{ url_for('confirm_upload') }}">
+    <input type="hidden" name="mutual_funds_file" value="{{ mutual_funds_file }}">
+    <input type="hidden" name="account_balances_file" value="{{ account_balances_file }}">
+    <button type="submit" name="confirm" value="yes">Confirm and Commit</button>
+    <button type="submit" name="confirm" value="no">Cancel</button>
+</form>
+
+{% endblock %}

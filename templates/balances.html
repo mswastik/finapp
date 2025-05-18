@@ -14,15 +14,14 @@
         <tbody>
             {% for balance in account_balances %}
             <tr>
-                <td>{{ balance.bank }}</td>
-                <td>{{ balance.date }}</td>
-                <td>{{ "%.2f" | format(balance.closing_balance) }}</td>
-
+                <td data-label="Bank">{{ balance.bank }}</td>
+                <td data-label="Date">{{ balance.date }}</td>
+                <td data-label="Balance">{{ "%.2f" | format(balance.closing_balance) }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    <div id="balanceChart" style="width: 900px;height: 500px;"></div>
+    <div id="balanceChart"></div>
     <script id="balances-data" type="application/json">{{ account_balances_data | tojson | safe }}</script>
 {% endblock %}
 
@@ -31,59 +30,63 @@
     const accountBalances = JSON.parse(document.getElementById('balances-data').textContent);
     function renderBalanceChart() {
         const chartDom = document.getElementById('balanceChart');
-            const myChart = echarts.init(chartDom);
-            let option;
-            const hdData = accountBalances.filter(function (item) {return item.bank ==='HDFC'}).map(item => [item['date'], item['closing_balance'].toFixed(0)]);
-            const icData = accountBalances.filter(function (item) {return item.bank ==='ICICI'}).map(item => [item['date'], item['closing_balance'].toFixed(0)]);
-            option = {
-                title: {
-                    text: 'Monthly Closing Balance'
-                },
-                tooltip: {
-                    trigger: 'axis',
-                },
-  dataZoom: [
-    {
-      type: 'inside',
-      start: 0,
-      end: 100
-    },
-    {
-      start: 50,
-      end: 100
-    }
-  ],
-                xAxis: {
-                    type: 'time',
-                },
-                yAxis: {
-                    type: 'value',
-                    axisLabel: {
-                        formatter: function (value) {
-                            return value.toFixed(0);
-                        }
-                    }
-                },
-                series: [{
-                    name: 'HDFC',
-                    type: 'line',
-                    data: hdData,
-                },
-            {
-                    name: 'ICICI',
-                    type: 'line',
-                    data: icData,
-                }]
-            };
+        // Set initial size for the chart container
+        chartDom.style.width = '100%';
+        chartDom.style.height = '500px'; // Or a responsive height like '60vh'
 
-            myChart.setOption(option);
-
-            // Handle chart resizing
-            $(window).on('resize', function() {
-                if (myChart) {
-                    myChart.resize();
+        const myChart = echarts.init(chartDom);
+        let option;
+        const hdData = accountBalances.filter(function (item) {return item.bank ==='HDFC'}).map(item => [item['date'], item['closing_balance'].toFixed(0)]);
+        const icData = accountBalances.filter(function (item) {return item.bank ==='ICICI'}).map(item => [item['date'], item['closing_balance'].toFixed(0)]);
+        option = {
+            title: {
+                text: 'Monthly Closing Balance'
+            },
+            tooltip: {
+                trigger: 'axis',
+            },
+            dataZoom: [
+                {
+                    type: 'inside',
+                    start: 0,
+                    end: 100
+                },
+                {
+                    start: 50,
+                    end: 100
                 }
-            });
+            ],
+            xAxis: {
+                type: 'time',
+            },
+            yAxis: {
+                type: 'value',
+                axisLabel: {
+                    formatter: function (value) {
+                        return value.toFixed(0);
+                    }
+                }
+            },
+            series: [{
+                name: 'HDFC',
+                type: 'line',
+                data: hdData,
+            },
+            {
+                name: 'ICICI',
+                type: 'line',
+                data: icData,
+            }]
+        };
+
+        myChart.setOption(option);
+
+        // Handle chart resizing
+        $(window).on('resize', function() {
+            if (myChart) {
+                myChart.resize();
+            }
+        });
     }
 
     $(document).ready(function () {
