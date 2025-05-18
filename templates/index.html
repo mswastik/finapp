@@ -27,8 +27,29 @@
         <label for="account_balances_file">Account Balances File:</label>
         <input type="file" name="account_balances_file" id="account_balances_file">
       </div>
+      <div id="password-field" style="display: none;">
+        <label for="pdf_password">PDF Password:</label>
+        <input type="password" name="pdf_password" id="pdf_password">
+      </div>
       <button type="submit">Upload</button>
     </form>
+
+    <script>
+      const mutualFundsFile = document.getElementById('mutual_funds_file');
+      const accountBalancesFile = document.getElementById('account_balances_file');
+      const passwordField = document.getElementById('password-field');
+
+      function togglePasswordField() {
+        if (mutualFundsFile.value.endsWith('.pdf') || accountBalancesFile.value.endsWith('.pdf')) {
+          passwordField.style.display = 'block';
+        } else {
+          passwordField.style.display = 'none';
+        }
+      }
+
+      mutualFundsFile.addEventListener('change', togglePasswordField);
+      accountBalancesFile.addEventListener('change', togglePasswordField);
+    </script>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

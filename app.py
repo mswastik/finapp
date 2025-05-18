@@ -147,8 +147,10 @@ def upload_file():
             flash('Invalid file type for one or both files', 'danger')
             return redirect(url_for('upload_file')) # Redirect back to the upload page
 
+        pdf_password = request.form.get('pdf_password')
+
         # Process files without committing to get new and last entries
-        result = process_excel_data(db_session, mutual_funds_filepath, account_balances_filepath, commit_changes=False)
+        result = process_excel_data(db_session, mutual_funds_filepath, account_balances_filepath, password=pdf_password, commit_changes=False)
 
         if result.get('error'):
             flash(f"Error processing files: {result['error']}", 'danger')
